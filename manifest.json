@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Cat side chat",
+  "version": "0.4.0",
+  "description": "A floating cat on claude.ai that opens a side chat about the main chat without writing anything into it.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://claude.ai/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": [
+        "store.js",
+        "reader.js",
+        "asker.js",
+        "brain.js",
+        "theme.js",
+        "markdown.js",
+        "logo-data.js",
+        "cat-roll.js",
+        "shell.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
