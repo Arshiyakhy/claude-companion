@@ -6,12 +6,14 @@ Works on **Claude, ChatGPT, Gemini and Grok**. On any other site, click the exte
 
 ![The cat swats its yarn ball and it rolls out into a chat bar](docs/cat.gif)
 
+**[Watch the full demo video](docs/demo.mp4)** (57 seconds, no sound)
+
 ## Install
 
-Works in Chrome, Edge, Brave, Opera and Arc.
+Works in Chrome, Edge, Brave, Opera, Arc, Vivaldi and any other browser built on Chromium.
 
 1. On this page, click **Code**, then **Download ZIP**, and unzip it somewhere you'll keep it.
-2. Open `chrome://extensions` (in Opera: `opera://extensions`) and turn on **Developer mode**.
+2. Open your browser's extensions page and turn on **Developer mode**: `chrome://extensions` in Chrome, `edge://extensions` in Edge, `brave://extensions` in Brave, `opera://extensions` in Opera, `vivaldi:extensions` in Vivaldi, and in Arc, Extensions in the menu, then Manage Extensions.
 3. Click **Load unpacked** and pick the unzipped folder.
 4. Open claude.ai, chatgpt.com, gemini.google.com or grok.com. The cat appears in the bottom right corner.
 
@@ -43,6 +45,8 @@ To update, replace the folder with the new download, press the reload arrow on t
 
 - **On Claude:** your own Claude account answers, in a hidden chat that's deleted when you close the side chat. Nothing extra to pay.
 - **Everywhere else:** Google's Gemini answers, using a free API key. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it in when the cat asks (or with `/key`). The key stays in your browser. The free tier has limits, so if it says the limit is used up, wait a minute.
+
+**Coming soon:** using your own account on ChatGPT, Gemini and Grok too, the same way it works on Claude, so no key is needed. The Gemini key will stay as a backup the cat switches to on its own if a site changes and its route stops working.
 
 On sites other than Claude, `/fork` and `/clone` open a new chat with the pack already in the message box. Press send to start.
 
