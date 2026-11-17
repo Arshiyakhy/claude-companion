@@ -1,12 +1,10 @@
-// BACKGROUND: three small jobs that can't run inside a web page.
+// BACKGROUND: two small jobs that can't run inside a web page.
 // 1. Talks to the Gemini API for the cat (the free key route), streaming the
 //    answer back piece by piece.
-// 2. Opens the helper tab for "your own account" answers on ChatGPT, Gemini
-//    and Grok (see helper.js), and passes messages between it and your tab.
-// 3. "Wake the cat here": clicking the extension's icon on any other site
+// 2. "Wake the cat here": clicking the extension's icon on any other site
 //    loads the cat on that tab.
 
-const FILES = ["store.js", "sites.js", "helper.js", "claude.js", "ai.js", "brain.js", "theme.js", "markdown.js", "logo-data.js", "cat-roll.js", "shell.js"];
+const FILES = ["store.js", "sites.js", "claude.js", "ai.js", "brain.js", "theme.js", "markdown.js", "logo-data.js", "cat-roll.js", "shell.js"];
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "cat-gemini") return;
@@ -55,54 +53,6 @@ chrome.runtime.onConnect.addListener((port) => {
       if (e.name !== "AbortError") try { port.postMessage({ error: String(e.message || e) }); } catch (e2) {}
     }
   });
-});
-
-// ---- helper tabs ----
-// asker port (your chat tab) <-> worker port (the helper tab), by helper tab id.
-const helpers = new Map();
-chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  if (msg && msg.type === "cat-helper-hello") reply({ helper: !!(sender.tab && helpers.has(sender.tab.id)) });
-});
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === "cat-helper") {
-    let tabId = null, closed = false;
-    port.onMessage.addListener(async (m) => {
-      if (m.open) {
-        try {
-          const from = port.sender && port.sender.tab;
-          const tab = await chrome.tabs.create({ url: m.open, active: false, windowId: from ? from.windowId : undefined });
-          if (closed) { chrome.tabs.remove(tab.id).catch(() => {}); return; }
-          tabId = tab.id;
-          helpers.set(tabId, { asker: port, worker: null, queue: [] });
-        } catch (e) { try { port.postMessage({ error: "couldn't open a helper tab" }); } catch (e2) {} }
-        return;
-      }
-      const h = tabId != null && helpers.get(tabId);
-      if (!h) return;
-      if (h.worker) h.worker.postMessage(m); else h.queue.push(m);
-    });
-    port.onDisconnect.addListener(() => {
-      closed = true;
-      if (tabId != null) { helpers.delete(tabId); chrome.tabs.remove(tabId).catch(() => {}); }
-    });
-    return;
-  }
-  if (port.name === "cat-helper-worker") {
-    const tabId = port.sender && port.sender.tab && port.sender.tab.id;
-    const h = helpers.get(tabId);
-    if (!h) { port.disconnect(); return; }
-    h.worker = port;
-    port.onMessage.addListener((m) => { try { h.asker.postMessage(m); } catch (e) {} });
-    for (const m of h.queue.splice(0)) port.postMessage(m);
-    port.onDisconnect.addListener(() => { if (helpers.get(tabId) === h) h.worker = null; });
-  }
-});
-// If someone closes the helper tab by hand, tell the asker so it can fall back.
-chrome.tabs.onRemoved.addListener((tabId) => {
-  const h = helpers.get(tabId);
-  if (!h) return;
-  helpers.delete(tabId);
-  try { h.asker.postMessage({ error: "the helper tab was closed" }); h.asker.disconnect(); } catch (e) {}
 });
 
 chrome.action.onClicked.addListener(async (tab) => {

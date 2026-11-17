@@ -1,11 +1,8 @@
-// AI: where the cat's own answers come from. Three ways:
+// AI: where the cat's own answers come from. Two ways:
 //   "account"  on claude.ai, your own Claude account answers, in a hidden chat
 //              that is deleted afterward (free, same AI you're talking to)
-//   "helper"   on ChatGPT, Gemini and Grok, your own account answers in a
-//              background tab of the same site (see helper.js)
-//   "key"      Google's Gemini answers, using a free API key you paste once
-//              (get one at aistudio.google.com/apikey). The backup when the
-//              helper can't work, and the only way on other sites.
+//   "key"      everywhere else, Google's Gemini answers, using a free API key
+//              you paste once (get one at aistudio.google.com/apikey)
 // Both look the same to the rest of the extension: open a session, send
 // prompts, get the answer as it streams, end the session.
 (function () {
@@ -23,7 +20,7 @@
   }
 
   // Used when no key is saved yet; the shell shows the key setup and retries.
-  class NeedsKey extends Error { constructor(msg) { super(msg || "Add a free Gemini key to use the cat on this site."); this.needsKey = true; } }
+  class NeedsKey extends Error { constructor() { super("Add a free Gemini key to use the cat on this site."); this.needsKey = true; } }
 
   // ---- your Claude account (claude.ai only) ----
   function accountSession() {
@@ -68,7 +65,6 @@
     const history = [];
     return {
       who: "Gemini (free key)",
-      history,
       async send(prompt, onDelta) {
         history.push({ role: "user", parts: [{ text: prompt }] });
         try {
@@ -81,46 +77,9 @@
     };
   }
 
-  // ---- your account through a helper tab, with the key as the backup ----
-  // If the helper fails (the site changed, the tab was closed), the same side
-  // chat carries on with the Gemini key, and this page stops trying the helper.
-  let helperBroken = false;
-  function helperSession(s) {
-    const site = CatExt.site;
-    let cur = CatExt.helper.session(site), usingKey = false;
-    const turns = [];
-    return {
-      get who() { return usingKey ? "Gemini (free key, " + site.name + " didn't work)" : cur.who; },
-      async send(prompt, onDelta) {
-        if (!usingKey) {
-          try {
-            const text = await cur.send(prompt, onDelta);
-            turns.push({ prompt, text });
-            return text;
-          } catch (e) {
-            helperBroken = true;
-            cur.end();
-            const fresh = await settings();
-            if (!fresh.geminiKey) throw new NeedsKey("Couldn't use your " + site.name + " account here (" + String(e.message || e) + "). Add a free Gemini key as a backup.");
-            cur = keySession(fresh); usingKey = true;
-            // Give Gemini the side chat so far, so it picks up where it was.
-            for (const t of turns) {
-              cur.history.push({ role: "user", parts: [{ text: t.prompt }] }, { role: "model", parts: [{ text: t.text }] });
-            }
-          }
-        }
-        const text = await cur.send(prompt, onDelta);
-        turns.push({ prompt, text });
-        return text;
-      },
-      end() { cur.end(); },
-    };
-  }
-
   async function session() {
     if (CatExt.site.account) return accountSession();
     const s = await settings();
-    if (CatExt.site.helperUrl && CatExt.helper && !helperBroken && s.useAccount !== false) return helperSession(s);
     if (!s.geminiKey) throw new NeedsKey();
     return keySession(s);
   }

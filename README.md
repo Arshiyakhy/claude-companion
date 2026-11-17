@@ -41,13 +41,10 @@ To update, replace the folder with the new download, press the reload arrow on t
 
 ## Who answers the cat's questions
 
-No key needed on any of the four. The cat uses the account you're already logged into.
+- **On Claude:** your own Claude account answers, in a hidden chat that's deleted when you close the side chat. Nothing extra to pay.
+- **Everywhere else:** Google's Gemini answers, using a free API key. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it in when the cat asks (or with `/key`). The key stays in your browser. The free tier has limits, so if it says the limit is used up, wait a minute.
 
-- **On Claude:** your own Claude account answers, in a hidden chat that's deleted when you close the side chat.
-- **On ChatGPT, Gemini and Grok:** your own account answers too. The cat opens a second tab of the same site in the background, asks there, reads the answer, and closes the tab when you close the side chat. On ChatGPT it uses a temporary chat, so nothing is saved to your history. On Gemini and Grok it switches on the private or temporary chat mode if it can find it.
-- **The backup, a free Gemini key:** these sites change their pages often, so the background tab route **may break**. When it does, the cat switches to Google's Gemini on its own, and the side chat carries on where it was. For that it needs a free key: get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and paste it in when the cat asks (or with `/key`). The key stays in your browser. It's also how the cat answers on any other site. The free tier has limits, so if it says the limit is used up, wait a minute.
-
-The side panel always says who answered, for example "answers from ChatGPT (your account)".
+**Want it without a key on ChatGPT, Gemini and Grok too?** It's possible to make the cat use the account you're already logged into there, like it does on Claude. If you'd want that, open an issue or tell me on X, and I'll build it.
 
 On sites other than Claude, `/fork` and `/clone` open a new chat with the pack already in the message box. Press send to start.
 
@@ -59,8 +56,7 @@ It's happy when the bar opens and thinking while an answer comes in. It gets sta
 
 - The cat reads chats from each site's page, and on Claude from the same data the page loads. None of this is an official API, so a site redesign can break it. Each site's reading code is a few lines in `sites.js`, so fixes are quick. If something breaks, open an issue.
 - Automating these sites may go against their terms, so use it for your own chats.
-- Side questions count toward your normal usage limits on that site.
-- On ChatGPT, Gemini and Grok, a background tab of the site opens while a side chat is going. Don't close it by hand, or the cat switches to the key.
+- Side questions on Claude count toward your normal usage limits.
 
 ## Files
 
@@ -69,9 +65,8 @@ It's happy when the bar opens and thinking while an answer comes in. It gets sta
 | `manifest.json` | Tells the browser what the extension is and where it runs |
 | `background.js` | Talks to Gemini for the free key route, and wakes the cat when you click the icon |
 | `sites.js` | The only part that knows each site: reads the chat, finds the message box |
-| `helper.js` | Answers with your own account on ChatGPT, Gemini and Grok, through a background tab |
 | `claude.js` | Claude account access: reads the chat and asks in hidden chats |
-| `ai.js` | Picks who answers (your account, or the Gemini key as the backup) |
+| `ai.js` | Picks who answers (your Claude account or a Gemini key) |
 | `brain.js` | What each command does, step by step |
 | `store.js` | Saves side chats, links between chats, and settings |
 | `shell.js` | Everything you see: the cat, bar, menu and panels |
