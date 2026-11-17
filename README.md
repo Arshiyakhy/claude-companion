@@ -6,8 +6,6 @@ Works on **Claude, ChatGPT, Gemini and Grok**. On any other site, click the exte
 
 ![The cat swats its yarn ball and it rolls out into a chat bar](docs/cat.gif)
 
-**[Watch the full demo video](docs/demo.mp4)** (57 seconds, no sound)
-
 ## Install
 
 Works in Chrome, Edge, Brave, Opera, Arc, Vivaldi and any other browser built on Chromium.
