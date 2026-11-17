@@ -11,6 +11,8 @@
 //   type /               -> the command menu
 (function () {
   const CatExt = (window.CatExt = window.CatExt || {});
+  // In a helper tab (see helper.js) the cat stays away.
+  const run = () => {
   if (document.getElementById("cat-ext-host")) return;
 
   const ICONS = {
@@ -428,7 +430,7 @@ button{font:inherit;color:inherit}
   function failed(err, m, retry) {
     setFace("idle");
     if (mode !== m) return;
-    if (err && err.needsKey) { startKey(retry); return; }
+    if (err && err.needsKey) { startKey(retry); if (/^Couldn't use/.test(err.message || "")) add("note", err.message); return; }
     react("oops");
     add("err", errText(err));
   }
@@ -770,10 +772,13 @@ button{font:inherit;color:inherit}
 
   // ---------- /key: the free Gemini key ----------
   async function startKey(then) {
-    openPanel("key", site.account ? "Only needed on sites other than Claude" : "So the cat can answer on " + site.name);
+    openPanel("key", site.account ? "Only needed on sites other than Claude" : site.helperUrl ? "The backup for " + site.name : "So the cat can answer on " + site.name);
     const s = await CatExt.ai.settings();
     const intro = add("note");
-    intro.innerHTML = (site.account ? "On Claude, the cat uses your own account. " : "On " + site.name.replace(/[<>&]/g, "") + ", the cat answers with Google's Gemini. ") +
+    const nm = site.name.replace(/[<>&]/g, "");
+    intro.innerHTML = (site.account ? "On Claude, the cat uses your own account. " :
+      site.helperUrl ? "On " + nm + ", the cat answers with your own account. If that stops working, it switches to Google's Gemini with this key. " :
+      "On " + nm + ", the cat answers with Google's Gemini. ") +
       'Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and paste it here. It stays in this browser only.';
     const inp = document.createElement("input");
     inp.type = "password"; inp.className = "keyin"; inp.id = "cat-key"; inp.autocomplete = "off";
@@ -1018,4 +1023,6 @@ button{font:inherit;color:inherit}
   }, true);
 
   document.documentElement.appendChild(host);
+  };
+  (CatExt.helperCheck || Promise.resolve(false)).then((isHelper) => { if (!isHelper) run(); });
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cat side chat",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A pixel cat for AI chats. Ask side questions, merge them back, fork, and share a chat's memory with teammates, without touching the main chat.",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": [
@@ -26,6 +26,7 @@
       "js": [
         "store.js",
         "sites.js",
+        "helper.js",
         "claude.js",
         "ai.js",
         "brain.js",

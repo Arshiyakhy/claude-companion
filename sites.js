@@ -1,9 +1,11 @@
 // SITES: the only part that knows which AI chat site we are on.
-// Each adapter answers four questions:
+// Each adapter answers these questions:
 //   chatKey()   which chat is open (changes when you switch chats)
 //   read()      the messages of the open chat, as [{role: "you" | "ai", text}]
 //   composer()  the site's own message box, so the cat can put text into it
 //   newChat     the address of a fresh chat on this site
+//   answers()   the AI's answers on the page (the helper tab reads the newest)
+//   helperUrl   where the helper tab opens, for answers from your own account
 // Sites change their pages now and then. When one breaks, its adapter below
 // is the place to fix, and nothing else needs to change.
 (function () {
@@ -12,8 +14,10 @@
   const visible = (el) => !!el && el.getClientRects().length > 0;
 
   // Turns a list of elements into messages, given a test for "you wrote this".
+  // Answers are read as markdown when helper.js is loaded, so code blocks stay code blocks.
+  const md = (el) => (el && CatExt.helper ? CatExt.helper.toMarkdown(el) : textOf(el));
   const turnsFrom = (els, isYou, inner) =>
-    [...els].map((el) => ({ role: isYou(el) ? "you" : "ai", text: textOf(inner ? el.querySelector(inner) || el : el) })).filter((m) => m.text);
+    [...els].map((el) => ({ role: isYou(el) ? "you" : "ai", text: md(inner ? el.querySelector(inner) || el : el) })).filter((m) => m.text);
 
   const ADAPTERS = [
     {
@@ -29,6 +33,9 @@
       match: (h) => /(^|\.)(chatgpt\.com|chat\.openai\.com)$/.test(h),
       turns: () => turnsFrom(document.querySelectorAll("[data-message-author-role]"), (el) => el.getAttribute("data-message-author-role") === "user"),
       composer: () => document.querySelector("#prompt-textarea") || document.querySelector('[contenteditable="true"]'),
+      answers: () => document.querySelectorAll('[data-message-author-role="assistant"]'),
+      sendButton: () => document.querySelector('[data-testid="send-button"], #composer-submit-button'),
+      helperUrl: "https://chatgpt.com/?temporary-chat=true",
       newChat: "/",
     },
     {
@@ -36,6 +43,9 @@
       match: (h) => h === "gemini.google.com",
       turns: () => turnsFrom(document.querySelectorAll("user-query, model-response"), (el) => el.tagName === "USER-QUERY", ".query-text, message-content"),
       composer: () => document.querySelector('rich-textarea [contenteditable="true"]') || document.querySelector('.ql-editor[contenteditable="true"]'),
+      answers: () => document.querySelectorAll("model-response message-content"),
+      sendButton: () => document.querySelector('button.send-button, button[aria-label*="Send" i]'),
+      helperUrl: "https://gemini.google.com/app",
       newChat: "/app",
     },
     {
@@ -43,6 +53,9 @@
       match: (h) => /(^|\.)grok\.com$/.test(h),
       turns: () => turnsFrom(document.querySelectorAll('[class*="message-bubble"]'), (el) => !!el.closest('[class*="items-end"]')),
       composer: () => document.querySelector("form textarea") || document.querySelector('[contenteditable="true"]'),
+      answers: () => [...document.querySelectorAll('[class*="message-bubble"]')].filter((el) => !el.closest('[class*="items-end"]')),
+      sendButton: () => document.querySelector('form button[type="submit"], button[aria-label*="Submit" i]'),
+      helperUrl: "https://grok.com/",
       newChat: "/",
     },
   ];
