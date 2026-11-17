@@ -1,12 +1,14 @@
-// SHELL: everything you see. The cat (drawn by cat-roll.js), the chat bar its
-// yarn ball unrolls into, the / command menu, and the side chat panel.
+// SHELL: everything you see. The pixel cat (drawn by cat-roll.js), the chat
+// bar its yarn ball unrolls into, the / command menu, and the side panel.
 // It all lives inside a Shadow DOM, a sealed box whose styles cannot leak into
-// the Claude page and cannot be broken by it.
+// the chat site and cannot be broken by it.
 //
-//   hover the cat  -> it swats its ball, the ball rolls left and unwinds into the bar
-//   type /         -> the command menu pops up above the bar
-//   branch (or just type a question) -> the side chat panel opens above the bar
-//   X or Escape    -> the bar winds back up into the ball, home to the cat
+//   click the cat        -> it swats its ball, which rolls and unwinds into the bar
+//   click it again       -> the bar winds back up into the ball (so do X and Escape)
+//   double-tap the cat   -> pick it up (bar open or closed); it follows your
+//                           pointer, tap to drop it (Escape puts it back),
+//                           or press and hold to drag it
+//   type /               -> the command menu
 (function () {
   const CatExt = (window.CatExt = window.CatExt || {});
   if (document.getElementById("cat-ext-host")) return;
@@ -14,23 +16,30 @@
   const ICONS = {
     branch: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-11.2 7.4"/>',
     merge: '<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10M6.8 6.7C9 12 12 17 16 18.6"/>',
+    tree: '<circle cx="6" cy="4" r="2"/><circle cx="6" cy="20" r="2"/><circle cx="18" cy="9" r="2"/><circle cx="18" cy="16" r="2"/><path d="M6 6v12M6 9h4c3 0 3 0 6 0M6 13c4 0 4 3 10 3"/>',
+    fork: '<circle cx="12" cy="19" r="2"/><circle cx="6" cy="5" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7M12 12v5"/>',
     share: '<path d="M12 3v12M7.5 7.5L12 3l4.5 4.5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
     clone: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+    key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2L20 3M16 7l3 3M14 9l2 2"/>',
   };
   const COMMANDS = [
-    { name: "branch", hint: "Ask a side question about this chat", enabled: true },
-    { name: "merge", hint: "Bring a side chat back into this chat", enabled: false },
-    { name: "share", hint: "Send your side chats to a friend", enabled: false },
-    { name: "clone", hint: "Open side chats a friend shared", enabled: false },
+    { name: "branch", hint: "Ask a side question about this chat" },
+    { name: "merge", hint: "Bring what you learned back into the main chat" },
+    { name: "tree", hint: "Everything that grew out of this chat" },
+    { name: "fork", hint: "Fresh chat that keeps this chat's memory" },
+    { name: "share", hint: "Make a memory pack of this chat for a teammate" },
+    { name: "clone", hint: "Start a chat from a teammate's memory pack" },
+    { name: "key", hint: "Free Gemini key, used on sites other than Claude" },
   ];
-  const R = CatExt.roll;
-  const BAR_H = R.BAR_H, CAT_W = R.CAT_W;
-  const SIZE = { w: 440 + CAT_W, h: 340 }; // the width is set by layout() below
+  const R = CatExt.roll, site = CatExt.site;
+  const BAR_H = R.BAR_H;
+  let CAT_W = 60, CAT_R = 30; // set by fitToMonitor() below
+  const SIZE = { h: 342 }; // a multiple of 3, so the pixel cat stays crisp
 
   // ---------- host and styles ----------
   const host = document.createElement("div");
   host.id = "cat-ext-host";
-  host.style.cssText = `position:fixed;right:16px;bottom:16px;width:${SIZE.w}px;height:${SIZE.h}px;z-index:2147483647;pointer-events:none;`;
+  host.style.cssText = `position:fixed;left:0;top:0;width:500px;height:${SIZE.h}px;z-index:2147483647;pointer-events:none;`;
   const root = host.attachShadow({ mode: "open" });
 
   root.innerHTML = `
@@ -38,13 +47,24 @@
 :host{all:initial}
 *{box-sizing:border-box}
 .wrap{position:relative;width:100%;height:100%;color:var(--c-ink);font-family:var(--c-font);font-size:14px;line-height:1.5}
-svg.anim{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:2}
-.cathit{position:absolute;right:0;bottom:0;width:${CAT_W + 50}px;height:96px;border:0;padding:0;background:transparent;border-radius:30px;cursor:pointer;pointer-events:auto;z-index:3}
+canvas.anim{position:absolute;left:0;top:0;pointer-events:none;z-index:2;image-rendering:pixelated}
+.cathit{position:absolute;right:0;bottom:0;width:var(--hit-w,90px);height:var(--hit-h,76px);border:0;padding:0;background:transparent;border-radius:30px;cursor:pointer;pointer-events:auto;z-index:3;touch-action:none}
+.wrap.dragging .cathit,.wrap.carrying .cathit{cursor:grabbing}
+/* cat on the left side of the screen: everything flips, the ball rolls right */
+.wrap.mirror canvas.anim{transform:scaleX(-1)}
+.wrap.mirror .cathit{right:auto;left:0}
+.wrap.mirror .composer{right:auto;left:var(--cat-w,60px)}
+.wrap.mirror .bar{flex-direction:row-reverse}
+.wrap.mirror .closex{left:auto;right:-8px}
+.wrap.mirror .menu{left:auto;right:8px}
+/* cat near the top of the screen: the panel and menu open below the bar */
+.wrap.below .composer{bottom:auto;top:calc(100% - ${BAR_H}px);flex-direction:column-reverse}
+.wrap.below .menu{bottom:auto;top:calc(100% + 8px)}
 button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--c-ink);outline-offset:2px}
 
 /* everything that opens sits in one column anchored to the bottom right */
-.composer{position:absolute;right:${CAT_W}px;bottom:0;width:var(--bar-w,440px);display:none;flex-direction:column;gap:8px;align-items:stretch;z-index:1}
+.composer{position:absolute;right:var(--cat-w,60px);bottom:0;width:var(--bar-w,440px);display:none;flex-direction:column;gap:8px;align-items:stretch;z-index:1}
 .wrap.open .composer{display:flex}
 .wrap.open .composer{pointer-events:auto}
 
@@ -107,19 +127,53 @@ button{font:inherit;color:inherit}
 .ans pre{margin:0;padding:8px 10px 10px;overflow-x:auto}
 .ans pre code{background:none;border:0;padding:0;line-height:1.55}
 .err{color:var(--c-err)}
+.pack{width:100%;min-height:220px;max-height:300px;resize:vertical;border:1px solid var(--c-border-strong);border-radius:12px;padding:10px 12px;background:var(--c-code);color:var(--c-ink);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+.pack:focus-visible{outline:2px solid var(--c-ink);outline-offset:1px}
+.warn{border:1px solid var(--c-err);border-radius:10px;padding:8px 10px;font-size:12.5px;color:var(--c-ink)}
+.warn b{color:var(--c-err)}
+.warn ul{margin:4px 0 0;padding-left:18px}
+.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.primary{min-height:44px;padding:0 18px;border-radius:22px;border:0;background:var(--c-ink);color:var(--c-bg);font-weight:600;cursor:pointer}
+.primary:disabled{opacity:.4;cursor:default}
 .dots{display:inline-flex;gap:4px;padding:6px 0}
 .dots i{width:6px;height:6px;border-radius:3px;background:var(--c-muted);animation:b 1s infinite ease-in-out}
 .dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
 @keyframes b{0%,80%,100%{opacity:.25}40%{opacity:1}}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.tree{position:relative}
+.tree svg.lines{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+.tree svg.lines path{fill:none;stroke-width:2;stroke-linecap:round}
+.tree .row{position:absolute;height:28px;display:flex;align-items:center;gap:6px;border:0;background:transparent;padding:0 8px;border-radius:8px;cursor:pointer;text-align:left;font-size:13px;min-width:0}
+.tree .row:hover{background:var(--c-soft)}
+.tree .row .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tree .row.msg .who{color:var(--c-muted);flex:none}
+.tree .row.side,.tree .row.link{border:1px solid var(--c-yarn);background:var(--c-bg)}
+.tree .row.side:hover,.tree .row.link:hover{background:var(--c-soft)}
+.tree .row.link{border-color:#2E8B7A}
+.tree .row.gap{cursor:default;color:var(--c-muted);font-size:12px}
+.tree .row.gap:hover{background:transparent}
+.tree .tag{flex:none;font-size:11px;border-radius:8px;padding:0 6px;border:1px solid var(--c-border-strong);color:var(--c-muted)}
+.mini{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px;margin-top:-4px;border-radius:16px;border:1px solid var(--c-border);background:transparent;cursor:pointer;font-size:12px;color:var(--c-muted)}
+.mini:hover{background:var(--c-soft);color:var(--c-ink)}
+.mini svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.inh{opacity:.55}
+.loglist{display:flex;flex-direction:column;gap:6px}
+.logitem{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;min-height:44px;padding:8px 12px;border:1px solid var(--c-border);border-radius:12px;background:transparent;cursor:pointer;width:100%}
+.logitem:hover{background:var(--c-soft)}
+.logitem .q{font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.logitem .m{font-size:12px;color:var(--c-muted)}
+.keyin{width:100%;min-height:44px;border:1px solid var(--c-border-strong);border-radius:12px;padding:0 12px;background:var(--c-code);color:var(--c-ink);font:inherit;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+.note a{color:inherit;text-decoration:underline}
+.secondary{min-height:44px;padding:0 16px;border-radius:22px;border:1px solid var(--c-border-strong);background:transparent;cursor:pointer}
+.secondary:hover{background:var(--c-soft)}
 </style>
 <div class="wrap">
-  <svg class="anim" viewBox="0 0 ${SIZE.w} ${SIZE.h}" aria-hidden="true"></svg>
-  <button type="button" class="cathit" aria-label="Cat helper, open the side chat bar"></button>
+  <canvas class="anim" aria-hidden="true"></canvas>
+  <button type="button" class="cathit" aria-label="Cat helper. Click to open the side chat bar, double-tap to move it"></button>
   <div class="composer">
     <section class="panel" role="region" aria-label="Side chat">
       <div class="head">
-        <span class="chip"><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS.branch}</svg>branch</span>
+        <span class="chip"><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS.branch}</svg><span class="chipname">branch</span></span>
         <span class="sub"></span>
         <button type="button" class="endbtn">End</button>
       </div>
@@ -141,30 +195,82 @@ button{font:inherit;color:inherit}
 </div>`;
 
   const $ = (s) => root.querySelector(s);
-  const wrap = $(".wrap"), catHit = $(".cathit"), composer = $(".composer"), bar = $(".bar");
+  const wrap = $(".wrap"), catHit = $(".cathit"), bar = $(".bar"), canvas = $("canvas.anim");
   const menu = $(".menu"), ballBtn = $(".ballbtn"), input = $(".in"), sendBtn = $(".send"), closeX = $(".closex");
   const panel = $(".panel"), body = $(".body"), sub = $(".sub"), endBtn = $(".endbtn"), sr = $(".sr");
+  const chipIcon = $(".chip svg"), chipName = $(".chipname");
+  const errText = (e) => String((e && e.message) || e);
 
-  // ---------- size: the bar is as wide as fits, up to 440px, with the cat to its right ----------
-  let barW = 440, geom = null;
-  const cat = R.build($("svg.anim"));
+  // ---------- where the cat sits ----------
+  // pos is the cat's center, saved as a fraction of the window. The bar unrolls
+  // toward the side with more room; the panel opens below the bar near the top.
+  let pos = null, mirror = false, below = false, barW = 438, hostW = 498, geom = null;
+  // Sizes the cat for the monitor this window is on. Runs again when the
+  // window moves to another monitor (its screen size or scaling changes).
+  let fitKey = "";
+  function fitToMonitor() {
+    const key = [screen.width, screen.height, window.devicePixelRatio].join("x");
+    if (key === fitKey) return false;
+    fitKey = key;
+    R.setPx(R.pickPx());
+    const z = R.size();
+    CAT_W = z.CAT_W; CAT_R = z.CAT_R;
+    wrap.style.setProperty("--cat-w", CAT_W + "px");
+    wrap.style.setProperty("--hit-w", Math.round(CAT_W + 15 * z.PX) + "px");
+    wrap.style.setProperty("--hit-h", Math.round(38 * z.PX) + "px");
+    return true;
+  }
+  fitToMonitor();
+  const cat = R.build(canvas, { mode: "pixel" });
+  function defaultPos() { return { fx: (window.innerWidth - 16 - CAT_R) / window.innerWidth, fy: (window.innerHeight - 16 - CAT_R) / window.innerHeight }; }
   function layout() {
-    barW = Math.max(280, Math.min(440, window.innerWidth - 40 - CAT_W));
-    const w = barW + CAT_W;
-    host.style.width = w + "px";
-    $("svg.anim").setAttribute("viewBox", `0 0 ${w} ${SIZE.h}`);
+    pos = pos || defaultPos();
+    const W = window.innerWidth, H = window.innerHeight;
+    const cx = Math.min(W - CAT_R, Math.max(CAT_R, pos.fx * W));
+    const cy = Math.min(H - CAT_R, Math.max(70, pos.fy * H));
+    mirror = cx < W / 2;
+    const room = mirror ? W - (cx - CAT_R) - CAT_W - 16 : cx + CAT_R - CAT_W - 16;
+    barW = Math.floor(Math.max(240, Math.min(440, room)) / 6) * 6;
+    hostW = barW + CAT_W;
+    const panelRoomAbove = cy - CAT_R - BAR_H - 24, panelRoomBelow = H - cy - 24;
+    below = panelRoomAbove < 320 && panelRoomBelow > panelRoomAbove;
+    const panelH = Math.max(200, Math.min(460, below ? panelRoomBelow : panelRoomAbove));
+    host.style.width = hostW + "px";
+    host.style.left = Math.round(mirror ? cx - CAT_R : cx + CAT_R - hostW) + "px";
+    host.style.top = Math.round(cy + CAT_R - SIZE.h) + "px";
+    wrap.classList.toggle("mirror", mirror);
+    wrap.classList.toggle("below", below);
     wrap.style.setProperty("--bar-w", barW + "px");
-    wrap.style.setProperty("--panel-h", Math.max(220, Math.min(460, window.innerHeight - BAR_H - 70)) + "px");
-    geom = R.geometry(w, SIZE.h);
+    wrap.style.setProperty("--panel-h", panelH + "px");
+    geom = R.geometry(hostW, SIZE.h);
+    cat.resize(hostW, SIZE.h);
   }
   layout();
-  window.addEventListener("resize", () => { layout(); paint(); });
+  window.addEventListener("resize", () => { fitToMonitor(); layout(); paint(); });
+  // Moving the window to another monitor doesn't always fire a resize, so check now and then.
+  setInterval(() => { if (fitToMonitor()) { layout(); paint(); } }, 2000);
+  try { chrome.storage.local.get("cat_pos").then((r) => { if (r && r.cat_pos) { pos = r.cat_pos; layout(); paint(); } }); } catch (e) {}
 
-  // ---------- theme: follow the person's Claude colors ----------
+  // ---------- theme: follow the site's colors ----------
   CatExt.theme.watch((t) => {
     for (const k in t.vars) wrap.style.setProperty(k, t.vars[k]);
     wrap.style.setProperty("--c-font", t.font);
+    cat.setColors({ ink: t.vars["--c-ink"], eye: t.vars["--c-eye"], yarn: t.vars["--c-yarn"], yarnDark: t.vars["--c-yarn-dark"] });
   });
+
+  // ---------- the cat's face ----------
+  // The cat reacts to what's happening: happy when it opens, thinking while an
+  // answer is coming, a wink when a pack is copied, star eyes on merge, a
+  // surprised face on errors, and sleepy when nobody has moved for a while.
+  let face = "idle";
+  function setFace(f) { face = f; cat.face(f); }
+  function react(name) { face = "idle"; cat.react(name, "idle"); }
+  let lastActive = Date.now();
+  function wake() {
+    lastActive = Date.now();
+    if (face === "sleepy") { react("hello"); }
+  }
+  setInterval(() => { if (face === "idle" && goal === 0 && Date.now() - lastActive > 90000) setFace("sleepy"); }, 5000);
 
   // ---------- the cat timeline ----------
   // p goes from 0 (cat with its ball) to 1 (bar open). The loop only runs while p moves.
@@ -172,12 +278,11 @@ button{font:inherit;color:inherit}
   const clamp = (x) => Math.min(1, Math.max(0, x));
   function paint() {
     const st = cat.render(p, geom);
+    if (!st) return;
     wrap.classList.toggle("open", p > 0.1 || goal === 1);
     wrap.classList.toggle("live", p > 0.97);
-    // The bar is unrolled up to where the ball is. Once fully open, drop the
-    // clip so the / menu above the bar can show.
-    bar.style.clipPath = st.cut <= 0 ? "none" : `inset(-20px -20px -20px ${st.cut.toFixed(1)}px round 28px)`;
-    // With the yarn used up, the / button takes the ball's spot with a small pop.
+    const c = st.cut.toFixed(1);
+    bar.style.clipPath = st.cut <= 0 ? "none" : mirror ? `inset(-20px ${c}px -20px -20px round 28px)` : `inset(-20px -20px -20px ${c}px round 28px)`;
     const q = clamp((p - 0.9) / 0.1);
     wrap.style.setProperty("--slash-o", Math.min(1, q * 2));
     wrap.style.setProperty("--slash-s", ((0.6 + 0.4 * q) * (1 + 0.12 * Math.sin(Math.PI * q))).toFixed(3));
@@ -186,7 +291,6 @@ button{font:inherit;color:inherit}
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    // The first open plays the whole show; later ones are quicker; closing is quickest.
     const dur = goal > p ? (openedOnce ? R.DURATION.reopen : R.DURATION.open) : R.DURATION.close;
     p = goal > p ? Math.min(goal, p + dt / dur) : Math.max(goal, p - dt / dur);
     paint();
@@ -196,46 +300,39 @@ button{font:inherit;color:inherit}
   }
   function go(t) {
     goal = t;
-    if (!running && p !== goal) {
-      running = true;
-      requestAnimationFrame((now) => { last = now; frame(now); });
-    }
+    if (!running && p !== goal) { running = true; requestAnimationFrame((now) => { last = now; frame(now); }); }
   }
   paint();
 
-  // ---------- opening and closing ----------
-  // The bar stays open while it is in use: focused, holding text, showing the
-  // menu, or running a side chat. Otherwise it folds back when the pointer leaves.
-  let inside = false, leaveTimer = null, session = null, busy = false;
-  const inUse = () => !!session || input.value.trim() !== "" || menu.classList.contains("show") || root.activeElement === input;
-  // A short pause before opening, so a mouse just passing over doesn't set it off.
-  let openTimer = null;
-  function open() { clearTimeout(leaveTimer); clearTimeout(openTimer); openTimer = setTimeout(() => go(1), goal === 1 ? 0 : 120); }
-  function maybeClose(delay) {
-    clearTimeout(leaveTimer);
-    leaveTimer = setTimeout(() => { if (!inside && !inUse()) closeAll(); }, delay);
+  // ---------- opening and closing: click the cat ----------
+  let session = null, busy = false, mode = null, dragging = false, carrying = null;
+  function openBar() {
+    wake();
+    if (film.heartsNext) { film.heartsNext = false; react("sharedlong"); } else react("hello");
+    go(1);
+    // Ready to type right away, while the ball is still rolling.
+    setTimeout(() => input.focus(), 60);
   }
-  catHit.addEventListener("mouseenter", () => { inside = true; open(); });
-  catHit.addEventListener("mouseleave", () => { inside = false; clearTimeout(openTimer); maybeClose(700); });
-  composer.addEventListener("mouseenter", () => { inside = true; clearTimeout(leaveTimer); });
-  composer.addEventListener("mouseleave", () => { inside = false; maybeClose(900); });
-  catHit.addEventListener("click", () => {
-    clearTimeout(openTimer); go(1);
-    setTimeout(() => input.focus(), (openedOnce ? R.DURATION.reopen : R.DURATION.open) * 1000 * (1 - p));
-  });
-  input.addEventListener("blur", () => maybeClose(900));
-  // Keep the page's highlighted text alive when the cat or a command is pressed.
-  [catHit, ballBtn, menu].forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
-
   function closeAll() {
     hideMenu();
-    endSession();
+    closePanel();
     input.value = "";
     autosize();
     input.blur();
     go(0);
   }
   closeX.addEventListener("click", closeAll);
+  // One click opens or closes; a second click within a moment makes it a
+  // double-tap, which picks the cat up instead.
+  let clickTimer = null, justDragged = false;
+  catHit.addEventListener("click", (e) => {
+    if (justDragged) { justDragged = false; return; }
+    if (carrying) return;
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; pickUp(e); return; }
+    clickTimer = setTimeout(() => { clickTimer = null; goal === 1 ? closeAll() : openBar(); }, 230);
+  });
+  // Keep the page's highlighted text alive when the cat or a command is pressed.
+  [catHit, ballBtn, menu].forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
 
   // ---------- the / menu ----------
   let shown = [], active = 0;
@@ -245,57 +342,38 @@ button{font:inherit;color:inherit}
     if (!shown.length) menu.innerHTML = '<div class="empty">No command called /' + filter.replace(/[<>&"]/g, "") + "</div>";
     else {
       menu.innerHTML = shown.map((c, i) => `
-        <button type="button" class="item" role="option" data-i="${i}"${c.enabled ? "" : ' aria-disabled="true"'}>
+        <button type="button" class="item" role="option" data-i="${i}">
           <svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[c.name]}</svg>
           <span class="t"><span class="n">/${c.name}</span><span class="h">${c.hint}</span></span>
-          ${c.enabled ? "" : '<span class="soon">soon</span>'}
         </button>`).join("");
       menu.querySelectorAll(".item").forEach((b) => {
         b.addEventListener("mouseenter", () => setActive(+b.dataset.i));
         b.addEventListener("click", () => pick(+b.dataset.i));
       });
     }
-    const firstOn = shown.findIndex((c) => c.enabled);
-    setActive(firstOn < 0 ? 0 : firstOn);
+    setActive(0);
     menu.classList.add("show");
     ballBtn.setAttribute("aria-expanded", "true");
   }
-  function hideMenu() {
-    menu.classList.remove("show");
-    ballBtn.setAttribute("aria-expanded", "false");
-  }
+  function hideMenu() { menu.classList.remove("show"); ballBtn.setAttribute("aria-expanded", "false"); }
   function setActive(i) {
     active = i;
-    menu.querySelectorAll(".item").forEach((b, j) => {
-      b.classList.toggle("on", j === i);
-      b.setAttribute("aria-selected", j === i ? "true" : "false");
-    });
+    menu.querySelectorAll(".item").forEach((b, j) => { b.classList.toggle("on", j === i); b.setAttribute("aria-selected", j === i ? "true" : "false"); });
   }
-  function move(step) {
-    if (!shown.length) return;
-    let i = active;
-    for (let n = 0; n < shown.length; n++) {
-      i = (i + step + shown.length) % shown.length;
-      if (shown[i].enabled) return setActive(i);
-    }
-  }
+  function move(step) { if (shown.length) setActive((active + step + shown.length) % shown.length); }
+  const RUN = { branch: () => startBranch(), merge: () => startMerge(), tree: () => startTree(), fork: () => startFork(), share: () => startShare(), clone: () => startClone(), key: () => startKey() };
   function pick(i) {
     const c = shown[i];
     if (!c) return;
-    if (!c.enabled) { sr.textContent = "/" + c.name + " is coming soon."; return; }
     hideMenu();
     input.value = "";
     autosize();
     input.focus();
-    if (c.name === "branch") startBranch();
+    RUN[c.name]();
   }
-  ballBtn.addEventListener("click", () => {
-    if (menu.classList.contains("show")) hideMenu();
-    else showMenu("");
-    input.focus();
-  });
+  ballBtn.addEventListener("click", () => { menu.classList.contains("show") ? hideMenu() : showMenu(""); input.focus(); });
 
-  // ---------- the side chat ----------
+  // ---------- the panel ----------
   function add(cls, text) {
     const el = document.createElement("div");
     el.className = cls;
@@ -304,56 +382,96 @@ button{font:inherit;color:inherit}
     body.scrollTop = body.scrollHeight;
     return el;
   }
-
-  async function startBranch() {
-    if (session) return session;
-    panel.classList.add("show");
-    body.textContent = "";
-    sub.textContent = "Reading the main chat";
-    const dots = add("dots");
-    dots.innerHTML = "<i></i><i></i><i></i>";
-    let s;
-    try {
-      s = await CatExt.brain.startBranch();
-    } catch (err) {
-      body.textContent = "";
-      sub.textContent = "";
-      add("err", "Could not read the main chat: " + (err.message || err));
-      return null;
-    }
-    session = s;
-    body.textContent = "";
-    const n = s.main.messages.length;
-    if (s.main.source === "api") sub.textContent = "knows the main chat, " + n + " messages";
-    else if (s.main.source === "page") sub.textContent = "read the main chat from the page";
-    else sub.textContent = "no chat open to read";
-    if (s.branch.highlight) {
-      add("label", "Highlighted in the main chat");
-      add("quote", s.branch.highlight);
-    }
-    if (s.main.source === "page") add("note", "Could not load the chat data (" + s.main.error + "), so this side chat sees the visible page text instead.");
-    return s;
+  function button(cls, label, onClick) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = cls; b.textContent = label;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+  function dots(el) { el.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>'; return el; }
+  // Streams text into el as Markdown, at most once per frame.
+  function streamer(el, still) {
+    let pending = "", queued = false;
+    return (t) => {
+      pending = t;
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; if (still()) { el.innerHTML = CatExt.markdown.render(pending); body.scrollTop = body.scrollHeight; } });
+    };
   }
 
-  function endSession() {
+  // The panel shows one thing at a time: a branch, a share, a log, and so on.
+  function openPanel(m, subText) {
+    if (mode) closePanel();
+    mode = m;
+    chipIcon.innerHTML = ICONS[m];
+    chipName.textContent = m;
+    endBtn.textContent = m === "branch" ? "End" : "Close";
+    sub.textContent = subText || "";
+    body.textContent = "";
+    panel.classList.add("show");
+    return m;
+  }
+  function closePanel() {
     const old = session;
     session = null;
     busy = false;
+    mode = null;
     if (old) CatExt.brain.close(old);
     panel.classList.remove("show");
     body.textContent = "";
     updateSend();
   }
-  endBtn.addEventListener("click", () => { endSession(); input.focus(); });
+  endBtn.addEventListener("click", () => { closePanel(); input.focus(); });
+
+  // Shared error handling: no key yet shows the key setup, then tries again.
+  function failed(err, m, retry) {
+    setFace("idle");
+    if (mode !== m) return;
+    if (err && err.needsKey) { startKey(retry); return; }
+    react("oops");
+    add("err", errText(err));
+  }
+
+  // ---------- /branch ----------
+  // A small button under each side answer: start a new branch of this side
+  // chat from that point (the side chat itself stays as it is).
+  function branchHere(branch, upTo) {
+    const b = button("mini", "", () => startBranch(null, { branch, upTo }).then(() => input.focus()));
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS.branch + "</svg>Branch from here";
+    b.setAttribute("aria-label", "Start a new branch of this side chat from this answer");
+    body.appendChild(b);
+  }
+
+  async function startBranch(old, from) {
+    if (session && !old && !from) return session;
+    const m = openPanel("branch", "Reading the main chat");
+    const d = dots(add(""));
+    let s;
+    try { s = await CatExt.brain.startBranch(old, from); } catch (err) { d.remove(); failed(err, m); return null; }
+    if (mode !== m) return null;
+    session = s;
+    body.textContent = "";
+    const n = s.main.messages.length;
+    sub.textContent = n ? (s.main.source === "page-text" ? "read this page's text" : "knows the main chat, " + n + " messages") : "no chat to read here yet";
+    if (s.branch.highlight) { add("label", "Highlighted in the main chat"); add("quote", s.branch.highlight); }
+    if (s.main.error) add("note", "Could not load the chat data (" + s.main.error + "), so this side chat sees the page text instead.");
+    if (s.branch.inherited && s.branch.inherited.length) {
+      add("label", "A branch of a side chat. It starts from here:");
+      s.branch.inherited.forEach((msg) => { if (msg.role === "you") add("you inh", msg.text); else add("ans inh").innerHTML = CatExt.markdown.render(msg.text); });
+    }
+    s.branch.messages.forEach((msg, i) => {
+      if (msg.role === "you") add("you", msg.text);
+      else { add("ans").innerHTML = CatExt.markdown.render(msg.text); branchHere(s.branch, i + 1); }
+    });
+    return s;
+  }
 
   async function submit() {
     const q = input.value.trim();
     if (!q || busy) return;
-    if (q.startsWith("/")) {
-      // A typed command, like "/branch" + Enter.
-      if (menu.classList.contains("show") && shown.length) pick(active);
-      return;
-    }
+    if (q.startsWith("/")) { if (menu.classList.contains("show") && shown.length) pick(active); return; }
+    if (mode && mode !== "branch") closePanel();
     busy = true;
     updateSend();
     input.value = "";
@@ -361,29 +479,321 @@ button{font:inherit;color:inherit}
     const s = session || (await startBranch());
     if (!s) { busy = false; updateSend(); return; }
     add("you", q);
-    const out = add("ans");
-    out.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>';
-    let pending = "", queued = false;
-    const draw = () => { queued = false; out.innerHTML = CatExt.markdown.render(pending); body.scrollTop = body.scrollHeight; };
+    const out = dots(add("ans"));
+    setFace("thinking");
     try {
-      await CatExt.brain.send(s, q, (text) => {
-        pending = text;
-        if (!queued) { queued = true; requestAnimationFrame(draw); }
-      });
+      await CatExt.brain.send(s, q, streamer(out, () => mode === "branch"));
+      setFace("idle");
+      if (session === s) branchHere(s.branch, s.branch.messages.length);
+      if (s.ai) sub.textContent = "answers from " + s.ai.who;
     } catch (err) {
-      out.className = "err";
-      out.textContent = String(err.message || err);
+      out.remove();
+      if (s.branch.messages.length === 0 || !(err && err.needsKey)) {
+        // Put the question back so nothing typed is lost.
+        if (!input.value) { input.value = q; autosize(); }
+      }
+      failed(err, "branch", () => { startBranch(); });
     }
     busy = false;
     updateSend();
     input.focus();
   }
 
-  // ---------- typing ----------
-  function autosize() {
-    input.style.height = "44px";
-    input.style.height = Math.min(input.scrollHeight, 150) + "px";
+  // ---------- /merge: bring a side chat back into the main chat ----------
+  async function startMerge() {
+    let branch = session && session.branch.messages.length ? session.branch : null;
+    if (!branch) {
+      const t = await CatExt.brain.tree();
+      branch = t.branches.slice().sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)))[0] || null;
+    }
+    const m = openPanel("merge", "Bring what you learned back into the main chat");
+    if (!branch) { add("note", "There's no side chat to merge yet. Ask a side question first (or use /branch)."); return; }
+    add("label", "From the side chat: " + (branch.messages[0] ? branch.messages[0].text.slice(0, 80) : ""));
+    const preview = dots(add("ans"));
+    setFace("thinking");
+    let note;
+    try { note = await CatExt.brain.mergeNote(branch, streamer(preview, () => mode === m)); } catch (err) { preview.remove(); failed(err, m, startMerge); return; }
+    setFace("idle");
+    if (mode !== m) return;
+    body.textContent = "";
+    sub.textContent = "Edit it if you like, then put it in the chat";
+    add("label", "Note for the main chat (you can edit it)");
+    const box = document.createElement("textarea");
+    box.className = "pack"; box.id = "cat-merge"; box.style.minHeight = "120px";
+    box.setAttribute("aria-label", "Note for the main chat, editable");
+    box.value = note;
+    body.appendChild(box);
+    const actions = add("actions");
+    const status = add("note");
+    actions.append(button("primary", "Put it in the chat box", () => {
+      const ok = site.insert(box.value.trim());
+      if (ok) {
+        CatExt.brain.markMerged(branch);
+        react("merge");
+        status.textContent = "It's in the chat box. Read it and press send when you're ready.";
+        sr.textContent = "Merged into the chat box.";
+      } else {
+        status.textContent = "Couldn't find this site's chat box, so copy it instead.";
+        copyText(box.value, status);
+      }
+    }), button("secondary", "Copy", () => copyText(box.value, status)));
   }
+
+  // ---------- /tree: everything that grew out of this chat ----------
+  // The main chat runs down the left as a line of dots. Side chats hang off
+  // the message they came from, and branches of side chats hang off those.
+  // The chat this one was forked or cloned from sits on top, and chats
+  // forked from this one sit at the bottom.
+  const STEP = 34, TRUNK = 12;
+  async function startTree() {
+    const m = openPanel("tree", "Everything that grew out of this chat");
+    const d = dots(add(""));
+    let t;
+    try { t = await CatExt.brain.tree(); } catch (err) { d.remove(); failed(err, m); return; }
+    if (mode !== m) return;
+    d.remove();
+    const msgs = t.main.messages;
+    if (!msgs.length && !t.branches.length) { add("note", "Nothing here yet. Ask a side question and it shows up in the tree."); return; }
+
+    // Where each side chat hangs: its saved snippet, or its saved position.
+    const norm = (x) => x.replace(/\s+/g, " ");
+    const anchorAt = (b) => {
+      if (b.anchorSnippet) { const i = msgs.findIndex((mm) => norm(mm.text).startsWith(b.anchorSnippet.slice(0, 50))); if (i >= 0) return i; }
+      return Math.max(0, Math.min(msgs.length - 1, b.anchorIndex == null ? msgs.length - 1 : b.anchorIndex));
+    };
+    const byId = new Map(t.branches.map((b) => [b.id, b]));
+    const kids = new Map(), tops = new Map();
+    t.branches.forEach((b) => {
+      if (b.parentId && byId.has(b.parentId)) kids.set(b.parentId, (kids.get(b.parentId) || []).concat(b));
+      else { const i = anchorAt(b); tops.set(i, (tops.get(i) || []).concat(b)); }
+    });
+
+    // Rows, top to bottom. Long chats fold the messages nothing hangs from.
+    const rows = [];
+    if (t.parentLink) rows.push({ kind: "link", depth: 1, label: (t.parentLink.kind === "clone" ? "Cloned from a teammate's pack: " : "Forked from: ") + (t.parentLink.title || "a chat"), href: t.parentLink.fromHref, up: true });
+    const keep = new Set([0, msgs.length - 1, msgs.length - 2, ...tops.keys()]);
+    let hidden = 0, firstMsgRow = -1, lastMsgRow = -1;
+    const addSide = (b, depth, parentRow) => {
+      const row = rows.push({ kind: "side", depth, b, parentRow }) - 1;
+      (kids.get(b.id) || []).forEach((k) => addSide(k, depth + 1, row));
+    };
+    msgs.forEach((mm, i) => {
+      if (!keep.has(i)) { hidden++; return; }
+      if (hidden) { rows.push({ kind: "gap", depth: 0, label: hidden + " more message" + (hidden > 1 ? "s" : "") }); hidden = 0; }
+      const row = rows.push({ kind: "msg", depth: 0, mm }) - 1;
+      if (firstMsgRow < 0) firstMsgRow = row;
+      lastMsgRow = row;
+      (tops.get(i) || []).forEach((b) => addSide(b, 1, row));
+    });
+    t.childLinks.forEach((l) => rows.push({ kind: "link", depth: 1, label: (l.kind === "clone" ? "Clone: " : "Fork: ") + (l.title || "a chat"), href: l.toHref, down: true }));
+
+    // Draw: lines in one SVG behind, rows as buttons on top.
+    const box = add("tree");
+    const W = body.clientWidth - 28, H = rows.length * STEP;
+    box.style.height = H + "px";
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("class", "lines"); svg.setAttribute("width", W); svg.setAttribute("height", H);
+    box.appendChild(svg);
+    const line = (dd, color) => { const p = document.createElementNS(svgNS, "path"); p.setAttribute("d", dd); p.setAttribute("stroke", color); svg.appendChild(p); return p; };
+    const ink = getComputedStyle(wrap).getPropertyValue("--c-muted").trim() || "#888";
+    const yarn = getComputedStyle(wrap).getPropertyValue("--c-yarn").trim() || "#4A6884";
+    const leftOf = (r) => (r.depth === 0 ? TRUNK : 26 + (r.depth - 1) * 20);
+    const mid = (i) => i * STEP + 14;
+    // The trunk, from the first message to the last row that hangs off it.
+    const trunkEnd = rows.reduce((e, r, i) => (r.kind === "link" && r.down ? i : e), lastMsgRow);
+    const trunkStart = t.parentLink ? 0 : firstMsgRow;
+    if (trunkStart >= 0 && trunkEnd >= 0) line(`M${TRUNK} ${mid(trunkStart)}V${mid(trunkEnd)}`, ink);
+    rows.forEach((r, i) => {
+      const y = mid(i), x = leftOf(r);
+      if (r.kind === "msg") {
+        const c = document.createElementNS(svgNS, "circle");
+        c.setAttribute("cx", TRUNK); c.setAttribute("cy", y); c.setAttribute("r", 5); c.setAttribute("fill", ink);
+        svg.appendChild(c);
+      } else if (r.kind === "side") {
+        const pr = rows[r.parentRow];
+        if (pr.kind === "msg") line(`M${TRUNK} ${mid(r.parentRow)}C${TRUNK + 10} ${y} ${x - 10} ${y} ${x} ${y}`, yarn);
+        else { const px = leftOf(pr) + 10; line(`M${px} ${mid(r.parentRow) + 14}V${y}H${x}`, yarn); }
+      } else if (r.kind === "link") {
+        line(`M${TRUNK} ${y}H${x}`, "#2E8B7A");
+      }
+      const el = document.createElement("button");
+      el.type = "button"; el.className = "row " + r.kind;
+      el.style.top = i * STEP + "px"; el.style.left = (r.kind === "msg" || r.kind === "gap" ? TRUNK + 12 : x) + "px";
+      el.style.maxWidth = W - (r.kind === "msg" || r.kind === "gap" ? TRUNK + 12 : x) + "px";
+      const lbl = document.createElement("span"); lbl.className = "lbl";
+      if (r.kind === "msg") {
+        const who = document.createElement("span"); who.className = "who"; who.textContent = r.mm.role === "you" ? "You:" : r.mm.role === "ai" ? "AI:" : "Page:";
+        el.append(who);
+        lbl.textContent = norm(r.mm.text).slice(0, 90);
+        el.setAttribute("aria-label", "Show this message in the chat: " + lbl.textContent);
+        el.addEventListener("click", () => scrollToText(r.mm.text));
+      } else if (r.kind === "side") {
+        lbl.textContent = r.b.messages[0].text;
+        el.setAttribute("aria-label", "Reopen side chat: " + lbl.textContent);
+        el.addEventListener("click", () => startBranch(r.b).then(() => input.focus()));
+      } else if (r.kind === "link") {
+        lbl.textContent = r.label;
+        if (r.href) el.addEventListener("click", () => location.assign(r.href));
+        else { el.disabled = true; el.title = "That chat gets its address once its first message is sent"; }
+      } else { lbl.textContent = "··· " + r.label; el.disabled = true; }
+      el.append(lbl);
+      if (r.kind === "side") {
+        const n = Math.round(r.b.messages.length / 2);
+        const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = r.b.mergedAt ? "merged" : n + (n > 1 ? " questions" : " question");
+        el.append(tag);
+      }
+      box.appendChild(el);
+    });
+    react("hello");
+  }
+
+  // Scrolls the real chat to a message and flashes it.
+  function scrollToText(text) {
+    const probe = text.replace(/\s+/g, " ").trim().slice(0, 30);
+    if (!probe) return;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const n = walker.currentNode, el = n.parentElement;
+      if (!el || el.closest("nav, aside, header, #cat-ext-host")) continue;
+      if (!n.textContent.replace(/\s+/g, " ").includes(probe.slice(0, 20))) continue;
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      try { el.animate([{ backgroundColor: "rgba(255,200,69,.55)" }, { backgroundColor: "rgba(255,200,69,0)" }], { duration: 1800 }); } catch (e) {}
+      return;
+    }
+    sr.textContent = "Couldn't find that message on the page.";
+  }
+
+  // ---------- /share and /fork: a memory pack ----------
+  async function writePack(m, onReady) {
+    add("note", "Summing up this chat on the side. The main chat stays as it is.");
+    const preview = dots(add("ans"));
+    setFace("thinking");
+    let pack;
+    try { pack = await CatExt.brain.makePack(streamer(preview, () => mode === m)); } catch (err) { preview.remove(); failed(err, m, () => RUN[m]()); return; }
+    setFace("idle");
+    if (mode !== m) return;
+    onReady(CatExt.brain.wrapPack(pack.title, pack.body));
+  }
+
+  function packEditor(text, how, actionsFor) {
+    sub.textContent = "Read it, edit anything you like";
+    body.textContent = "";
+    add("label", "Memory pack (you can edit it)");
+    const box = document.createElement("textarea");
+    box.className = "pack"; box.id = "cat-pack";
+    box.setAttribute("aria-label", "Memory pack, editable");
+    box.value = text;
+    body.appendChild(box);
+    const warn = add("warn");
+    const actions = add("actions");
+    const status = add("note");
+    actionsFor(box, actions, status);
+    const note = document.createElement("span"); note.className = "note"; note.textContent = how;
+    actions.append(note);
+    function check() {
+      const hits = CatExt.brain.findSecrets(box.value);
+      warn.style.display = hits.length ? "" : "none";
+      warn.innerHTML = hits.length ? "<b>Check before sending.</b> These lines look private:<ul>" +
+        hits.slice(0, 6).map((h) => "<li>Line " + h.line + " looks like " + h.what + "</li>").join("") + "</ul>" : "";
+    }
+    box.addEventListener("input", check);
+    check();
+    body.scrollTop = 0;
+  }
+
+  async function copyText(text, status) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+      const t = document.createElement("textarea"); t.value = text; body.appendChild(t); t.select();
+      try { ok = document.execCommand("copy"); } catch (e2) {}
+      t.remove();
+    }
+    if (ok) react("copied");
+    if (status) status.textContent = ok ? "Copied." : "Couldn't copy automatically. Select the text and copy it.";
+    sr.textContent = ok ? "Copied." : "Could not copy automatically.";
+    return ok;
+  }
+
+  function startShare() {
+    const m = openPanel("share", "Writing a memory pack from this chat");
+    writePack(m, (text) => packEditor(text, "Your teammate pastes it into their cat with /clone, on any AI site.", (box, actions, status) => {
+      actions.append(button("primary", "Copy pack", async () => { if (await copyText(box.value, status)) setTimeout(() => react("shared"), 1300); }));
+    }));
+  }
+
+  function startFork() {
+    const m = openPanel("fork", "A fresh chat that remembers this one");
+    writePack(m, (text) => packEditor(text, site.account ? "Opens as a new chat in your account." : "Opens a new chat with the pack ready in the box.", (box, actions, status) => {
+      const b = button("primary", "Start the fresh chat", async () => {
+        b.disabled = true;
+        status.textContent = "Starting the new chat...";
+        try { const url = await CatExt.brain.forkWith(box.value); react("merge"); setTimeout(() => location.assign(url), 900); }
+        catch (err) { status.className = "err"; status.textContent = errText(err); b.disabled = false; }
+      });
+      actions.append(b);
+    }));
+  }
+
+  // ---------- /clone: start a chat from a teammate's pack ----------
+  function startClone() {
+    openPanel("clone", "Start a chat from a teammate's memory pack");
+    add("label", "Paste the memory pack here");
+    const box = document.createElement("textarea");
+    box.className = "pack"; box.id = "cat-clone";
+    box.setAttribute("aria-label", "Paste a memory pack");
+    box.placeholder = "===== CAT MEMORY PACK v1 =====";
+    body.appendChild(box);
+    const actions = add("actions");
+    const status = add("note");
+    const b = button("primary", "Start the chat", async () => {
+      b.disabled = true; box.readOnly = true;
+      status.className = "note";
+      status.textContent = "Loading the pack into a new chat...";
+      try {
+        const url = await CatExt.brain.clonePack(box.value);
+        status.textContent = "Done. Opening the new chat.";
+        react("hello");
+        location.assign(url);
+      } catch (err) {
+        status.className = "err"; status.textContent = errText(err);
+        b.disabled = false; box.readOnly = false;
+      }
+    });
+    b.disabled = true;
+    const how = document.createElement("span"); how.className = "note";
+    how.textContent = site.account ? "It opens as a new chat in your account." : "It opens a new chat with the pack ready in the box.";
+    actions.append(b, how);
+    box.addEventListener("input", () => { b.disabled = box.value.trim().length < 40; });
+    setTimeout(() => box.focus(), 50);
+  }
+
+  // ---------- /key: the free Gemini key ----------
+  async function startKey(then) {
+    openPanel("key", site.account ? "Only needed on sites other than Claude" : "So the cat can answer on " + site.name);
+    const s = await CatExt.ai.settings();
+    const intro = add("note");
+    intro.innerHTML = (site.account ? "On Claude, the cat uses your own account. " : "On " + site.name.replace(/[<>&]/g, "") + ", the cat answers with Google's Gemini. ") +
+      'Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> and paste it here. It stays in this browser only.';
+    const inp = document.createElement("input");
+    inp.type = "password"; inp.className = "keyin"; inp.id = "cat-key"; inp.autocomplete = "off";
+    inp.setAttribute("aria-label", "Gemini API key"); inp.placeholder = "Paste your Gemini key";
+    inp.value = s.geminiKey || "";
+    body.appendChild(inp);
+    const actions = add("actions");
+    const status = add("note");
+    const save = button("primary", "Save key", async () => {
+      await CatExt.ai.saveSettings({ geminiKey: inp.value.trim() });
+      status.textContent = inp.value.trim() ? "Saved." : "Key removed.";
+      react("hello");
+      if (then && inp.value.trim()) setTimeout(then, 500);
+    });
+    actions.append(save);
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  // ---------- typing ----------
+  function autosize() { input.style.height = "44px"; input.style.height = Math.min(input.scrollHeight, 150) + "px"; }
   function updateSend() {
     const v = input.value.trim();
     sendBtn.disabled = busy || !v || (v.startsWith("/") && !menu.classList.contains("show"));
@@ -391,28 +801,16 @@ button{font:inherit;color:inherit}
   input.addEventListener("input", () => {
     autosize();
     const m = input.value.match(/^\/(\w*)$/);
-    if (m) showMenu(m[1]);
-    else hideMenu();
+    m ? showMenu(m[1]) : hideMenu();
     updateSend();
   });
   // Enter sends. Tab+Enter (hold Tab, press Enter) or Shift+Enter makes a new line.
-  // While the / menu is open, the arrow keys move and Enter or Tab picks.
   let tabHeld = false;
   input.addEventListener("keydown", (e) => {
     const menuOpen = menu.classList.contains("show");
     if (menuOpen && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); move(e.key === "ArrowDown" ? 1 : -1); return; }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      if (menuOpen) hideMenu();
-      else closeAll();
-      return;
-    }
-    if (e.key === "Tab" && !e.shiftKey) {
-      e.preventDefault();
-      if (menuOpen) { pick(active); return; }
-      tabHeld = true;
-      return;
-    }
+    if (e.key === "Escape") { e.preventDefault(); menuOpen ? hideMenu() : closeAll(); return; }
+    if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); if (menuOpen) { pick(active); return; } tabHeld = true; return; }
     if (e.key === "Enter" && !e.isComposing) {
       if (menuOpen) { e.preventDefault(); pick(active); return; }
       if (e.shiftKey || tabHeld) return;
@@ -423,35 +821,201 @@ button{font:inherit;color:inherit}
   input.addEventListener("keyup", (e) => { if (e.key === "Tab") tabHeld = false; });
   input.addEventListener("blur", () => { tabHeld = false; });
   sendBtn.addEventListener("click", submit);
-  // Stop the Claude page from reacting to keys typed inside the bar.
+  // Stop the chat site from reacting to keys typed inside the cat.
   ["keydown", "keyup", "keypress"].forEach((type) => host.addEventListener(type, (e) => e.stopPropagation()));
-  // A click anywhere outside the menu closes it.
   root.addEventListener("mousedown", (e) => {
     if (menu.classList.contains("show") && !menu.contains(e.target) && e.target !== ballBtn && !ballBtn.contains(e.target) && e.target !== input) hideMenu();
   });
 
   // ---------- switching chats ----------
-  // claude.ai changes chats without reloading the page, so we watch the address.
-  // A side chat belongs to the chat it was opened from, so it ends (and its
-  // hidden conversation is deleted) when you move to another chat.
-  let lastPath = location.pathname;
+  // These sites change chats without reloading the page, so we watch for it.
+  // A side chat belongs to the chat it was opened from, so it ends on a switch.
+  let lastKey = site.chatKey();
   setInterval(() => {
-    if (location.pathname === lastPath) return;
-    lastPath = location.pathname;
-    CatExt.reader.resetSelection();
-    if (session) endSession();
+    const k = site.chatKey();
+    if (k === lastKey) return;
+    lastKey = k;
+    site.resetSelection();
+    if (mode) closePanel();
   }, 500);
   window.addEventListener("pagehide", () => { if (session) CatExt.brain.close(session); });
 
-  // ---------- the cat stays alive: blinking, and watching your mouse ----------
+  // A new chat on ChatGPT, Gemini or Grok gets its own address when you send
+  // the first message. Then the tree link from the old chat is finished.
+  function waitForAddress(linkId) {
+    const start = site.chatKey();
+    const timer = setInterval(() => {
+      if (site.chatKey() === start) return;
+      clearInterval(timer);
+      CatExt.brain.finishLink(linkId);
+    }, 1000);
+    setTimeout(() => clearInterval(timer), 30 * 60 * 1000);
+  }
+
+  // Text left by /fork or /clone on the last page goes into this page's box.
+  (async () => {
+    let pend = null;
+    try { pend = await site.takeLeftText(); } catch (e) {}
+    if (!pend) return;
+    if (pend.linkId) waitForAddress(pend.linkId);
+    for (let i = 0; i < 40; i++) {
+      if (site.composer()) { site.insert(pend.text); react("hello"); sr.textContent = "The memory pack is in the chat box. Press send to start."; return; }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  })();
+
+  // ---------- staying alive: blinking, watching your mouse ----------
   R.startBlinking((v) => cat.blink(v));
   let mouse = null, lookQueued = false;
   document.addEventListener("mousemove", (e) => {
+    lastActive = Date.now();
+    if (face === "sleepy" && !film.on) wake(); // in film mode, only a click wakes it
     const r = host.getBoundingClientRect();
-    mouse = [e.clientX - r.left, e.clientY - r.top];
+    mouse = [mirror ? r.right - e.clientX : e.clientX - r.left, e.clientY - r.top];
+    if (carrying) carryTo(e.clientX, e.clientY);
     if (!lookQueued) { lookQueued = true; requestAnimationFrame(() => { lookQueued = false; cat.look(mouse); }); }
   }, { passive: true });
+  document.addEventListener("keydown", () => { lastActive = Date.now(); }, true);
   document.addEventListener("mouseleave", () => cat.look(null));
+
+  // ---------- moving the cat ----------
+  // Two ways, with the bar open or closed: double-tap it and it follows your
+  // pointer until you tap again (Escape puts it back), or press, hold for a
+  // moment (0.15 seconds), and drag.
+  function lift() {
+    wrap.classList.add("carrying");
+    host.style.transformOrigin = (mirror ? CAT_R : hostW - CAT_R) + "px " + (SIZE.h - CAT_R) + "px";
+    host.style.transition = "transform .15s ease, filter .15s ease";
+    host.style.transform = "translateY(-4px) scale(1.06)";
+    host.style.filter = "drop-shadow(0 10px 10px rgba(0,0,0,.22))";
+    setFace("happy");
+  }
+  function land() {
+    wrap.classList.remove("carrying", "dragging");
+    host.style.transition = ""; host.style.transform = ""; host.style.filter = "";
+    try { host.animate([{ transform: "scale(1.08, 0.9)" }, { transform: "scale(0.97, 1.04)" }, { transform: "none" }], { duration: 260, easing: "ease-out" }); } catch (err) {}
+    try { chrome.storage.local.set({ cat_pos: pos }); } catch (err) {}
+    react("hello");
+  }
+  function carryTo(x, y) {
+    const W = window.innerWidth, H = window.innerHeight;
+    pos = { fx: x / W, fy: y / H };
+    layout(); paint();
+    host.style.transformOrigin = (mirror ? CAT_R : hostW - CAT_R) + "px " + (SIZE.h - CAT_R) + "px";
+  }
+  // Works with the bar open too: the bar and panel move along with the cat.
+  function pickUp(e) {
+    hideMenu();
+    carrying = { from: pos };
+    lift();
+    carryTo(e.clientX, e.clientY);
+    sr.textContent = "Cat picked up. Move your pointer and tap to drop it. Escape puts it back.";
+    // The next tap anywhere drops it; that tap doesn't reach the page.
+    setTimeout(() => {
+      document.addEventListener("pointerdown", dropTap, true);
+      document.addEventListener("keydown", escCarry, true);
+    }, 0);
+  }
+  function endCarry() {
+    document.removeEventListener("pointerdown", dropTap, true);
+    document.removeEventListener("keydown", escCarry, true);
+    carrying = null;
+    land();
+  }
+  function swallowClick(e) { e.preventDefault(); e.stopPropagation(); }
+  function dropTap(e) {
+    e.preventDefault(); e.stopPropagation();
+    document.addEventListener("click", swallowClick, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener("click", swallowClick, true), 400);
+    justDragged = true; setTimeout(() => { justDragged = false; }, 400);
+    carryTo(e.clientX, e.clientY);
+    endCarry();
+    sr.textContent = "Cat dropped.";
+  }
+  function escCarry(e) {
+    if (e.key !== "Escape") return;
+    e.preventDefault(); e.stopPropagation();
+    pos = carrying.from; layout(); paint();
+    endCarry();
+    sr.textContent = "Cat put back.";
+  }
+
+  // Press and hold, then drag.
+  let holdTimer = null, start = null, grab = null;
+  catHit.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || carrying) return;
+    start = [e.clientX, e.clientY];
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      dragging = true;
+      clearTimeout(clickTimer); clickTimer = null;
+      try { catHit.setPointerCapture(e.pointerId); } catch (err) {}
+      const W = window.innerWidth, H = window.innerHeight;
+      grab = [start[0] - pos.fx * W, start[1] - pos.fy * H];
+      wrap.classList.add("dragging");
+      lift();
+      sr.textContent = "Cat picked up. Move it and let go.";
+    }, 150);
+  });
+  catHit.addEventListener("pointermove", (e) => {
+    if (!dragging) {
+      if (start && Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 6) { clearTimeout(holdTimer); start = null; }
+      return;
+    }
+    carryTo(e.clientX - grab[0], e.clientY - grab[1]);
+  });
+  function drop() {
+    clearTimeout(holdTimer);
+    start = null;
+    if (!dragging) return;
+    dragging = false;
+    justDragged = true;
+    setTimeout(() => { justDragged = false; }, 400);
+    land();
+    sr.textContent = "Cat dropped.";
+  }
+  catHit.addEventListener("pointerup", drop);
+  catHit.addEventListener("pointercancel", drop);
+
+  // ---------- film mode (for making demo videos) ----------
+  // Off by default. Ctrl+Shift+F turns it on or off. While on:
+  //   Ctrl+Shift+1  the cat falls asleep right away
+  //   Ctrl+Shift+2  the next click on the cat gives heart eyes
+  //   Ctrl+Shift+3  one slow blink
+  //   Ctrl+Shift+9  the cat pops into pixels and disappears
+  //   Ctrl+Shift+0  the cat comes back
+  const film = { on: false, heartsNext: false };
+  try { chrome.storage.local.get("cat_film").then((r) => { film.on = !!(r && r.cat_film); }); } catch (e) {}
+  function popCat() {
+    const z = R.size ? R.size() : null;
+    const ox = mirror ? (z ? z.CAT_R : 30) : hostW - (z ? z.CAT_R : 30), oy = SIZE.h - (z ? z.CAT_R : 30);
+    canvas.style.transformOrigin = ox + "px " + oy + "px";
+    const base = mirror ? "scaleX(-1) " : "";
+    try {
+      const a = canvas.animate([{ transform: base + "scale(1)" }, { transform: base + "scale(1.12, 0.88)" }, { transform: base + "scale(1.22)" }], { duration: 220, easing: "ease-in" });
+      a.onfinish = () => { canvas.style.transform = ""; cat.pop(); };
+    } catch (e) { cat.pop(); }
+  }
+  document.addEventListener("keydown", (e) => {
+    if (!e.ctrlKey || !e.shiftKey) return;
+    const k = e.code;
+    if (k === "KeyF") {
+      film.on = !film.on;
+      try { chrome.storage.local.set({ cat_film: film.on }); } catch (err) {}
+      sr.textContent = film.on ? "Film mode on." : "Film mode off.";
+      react(film.on ? "copied" : "hello");
+    } else if (!film.on) return;
+    else if (k === "Digit1") { if (goal === 1) closeAll(); setFace("sleepy"); }
+    else if (k === "Digit2") { film.heartsNext = true; }
+    else if (k === "Digit3") { // one slow blink
+      const t0 = performance.now();
+      (function step(now) { const t = (now - t0) / 260; cat.blink(t >= 1 ? 0 : Math.sin(Math.PI * t)); if (t < 1) requestAnimationFrame(step); })(t0);
+    }
+    else if (k === "Digit9") { if (goal === 1) closeAll(); setTimeout(popCat, goal === 1 ? 700 : 0); }
+    else if (k === "Digit0") { cat.unpop(); react("hello"); }
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  }, true);
 
   document.documentElement.appendChild(host);
 })();

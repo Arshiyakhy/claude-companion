@@ -1,17 +1,33 @@
 {
   "manifest_version": 3,
   "name": "Cat side chat",
-  "version": "0.4.0",
-  "description": "A floating cat on claude.ai that opens a side chat about the main chat without writing anything into it.",
-  "permissions": ["storage"],
-  "host_permissions": ["https://claude.ai/*"],
+  "version": "0.7.0",
+  "description": "A pixel cat for AI chats. Ask side questions, merge them back, fork, and share a chat's memory with teammates, without touching the main chat.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://gemini.google.com/*",
+    "https://grok.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Wake the cat on this page" },
   "content_scripts": [
     {
-      "matches": ["https://claude.ai/*"],
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*"
+      ],
       "js": [
         "store.js",
-        "reader.js",
-        "asker.js",
+        "sites.js",
+        "claude.js",
+        "ai.js",
         "brain.js",
         "theme.js",
         "markdown.js",

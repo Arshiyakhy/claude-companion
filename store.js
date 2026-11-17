@@ -28,5 +28,16 @@
     return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
   }
 
-  CatExt.store = { all, save, uid };
+  // Links between chats: made by /fork (this chat -> a fresh one) and /clone
+  // (a teammate's pack -> a new chat). The tree uses them to connect chats.
+  const LINKS = "cat_links";
+  async function links() { const r = await chrome.storage.local.get(LINKS); return r[LINKS] || []; }
+  async function saveLink(link) {
+    const list = await links();
+    const i = list.findIndex((l) => l.id === link.id);
+    if (i >= 0) list[i] = link; else list.push(link);
+    await chrome.storage.local.set({ [LINKS]: list });
+  }
+
+  CatExt.store = { all, save, uid, links, saveLink };
 })();
